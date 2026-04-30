@@ -1,344 +1,209 @@
-# UniPi MQTT
+# unipi-mqtt
 
-This is a script that creates MQTT messages based on the events that happen on the UNIPI device ans switches UniPi outputs based on received MQTT messages. Worked with a Unipi 513 here. Main goal is to get MQTT messages to/from Home Assistant.
+Bridges a [UniPi](https://www.unipi.technology/) Neuron / Axon device running [Evok](https://github.com/UniPiTechnology/evok) to **Home Assistant** via **MQTT Discovery**.
 
-Script creates a websocket connection to EVOK and based on those websocket messages and a config file MQTT messages are published. 
+Entities (lights, switches, binary sensors) appear automatically in Home Assistant — no manual YAML configuration required.
+Local direct-wiring (switch → relay) works immediately and independently of the network or Home Assistant.
 
-Also creates a MQTT listener to listen to incomming MQTT topics and switch UniPi outputs based on those messages. I created the system in such a way that info to switch an output must be in the MQTT message. See the Hass examples below. 
+## Features
 
-WARNING: I am not a programmer, so this code kinda works, but it ain't pretty ;-) (I think...). So there is a big chance you need to tinker a bit in the scripts. It's also a version 1 that I build specifically for my home assistant setup, so it's quite tailored to my personal need and way of working.
+- **MQTT Discovery** — outputs and inputs register themselves in HA automatically
+- **Press types** — pushbuttons distinguish `short_press`, `long_press`, and `double_press`; each can trigger a different action on a different output
+- **Auto-off timers** — any link can set `auto_off_s` to automatically turn an output off after N seconds
+- **Motion sensors** — auto-publish OFF after a configurable delay
+- **Fully async** — single-process, no threads, low overhead
+- **Docker-ready** — run on the UniPi itself or on a central server / Kubernetes cluster
 
-Update July 2020, I have a 'unipi friend' in Belgium now that has a setup too, and changes this to be a bit more generic, so perhaps a bit broader applicable. 
+## Requirements
 
-Be sure to use the 2 python scripts (python3) and the json config file. 
+- Python 3.11+ **or** Docker
+- A UniPi device with [Evok](https://evok.api-docs.io/) running (WebSocket + REST API)
+- An MQTT broker (e.g. Mosquitto, the one bundled with Home Assistant)
 
-## Setup
+## Quick start (Python)
 
-I put the files in a directory and create a service to automatically start and stop the service on system start. 
-
-Prereq:
- - A UniPi system with EVOK (opensource software from EVOK, works both on a self build as wel as on a UniPi provided Evok image from here (https://kb.unipi.technology/en:files:software:os-images:00-start). Don't forget to install Evok afterwards per documentation in that site.
- - MQTT Broker somewhere
- 
-Setup:
- - Install python 3 and pip (sudo apt install `python3-pip`) 
- - Install the required python packes with pip (`pip3 install paho-mqtt threaded websocket-client statistics requests`)
- - Copy the 3 scripts into a dir (I use /scripts in my unipi user dir, can be anything)
- - Adjust the vars in the script to your needs, like IP, etc.
- - Adjust the unipi_mqtt_config.json file to refelxt your unipi and the connected devices to it (see below for more details)
- - optional; Create a service based on this script (example to do so here; https://github.com/MydKnight/PiClasses/wiki/Making-a-script-run-as-daemon-on-boot) Example file in this github (unipi_mqtt.service)
- - Start the service or script and see what happens (sudo service start unipi_mqtt)
- - Logging goes to /var/log/unipi_mqtt.log
-
-## UniPi unipi_mqtt_config.json
-
-A config file is used to describe to inputs on the UniPi so the script knows what to send out when a change on a input is detected. An example config file is in the repo, here an example entry. It's JSON, so make sure it's valid. 
-
-### Digital In as binary sensor in HA
-
-Example PIR sensor for motion detection in unipi_mqtt_config.json:
-```json
-   {
-      "circuit":"1_04",
-      "description":"Kantoor PIR",
-      "dev":"input",
-      "device_delay":120,
-      "device_normal":"no",
-      "unipi_value":0,
-      "unipi_prev_value":0,
-      "unipi_prev_value_timstamp":0,
-      "state_topic": "unipi/bgg/kantoor/motion"
-   },
+```bash
+pip install -r requirements.txt
+# Edit config.yaml with your IPs and devices
+python unipi_mqtt.py
 ```
 
-The HA part for this is a binary sensor: 
-```
-- platform: mqtt
-  name: "Kantoor Motion"
-  unique_id: "kantoor_motion"
-  state_topic: "unipi/bgg/kantoor/motion"
-  payload_on: "ON"
-  payload_off: "OFF"
-  availability_topic: "unipi/bgg/kantoor/motion/available"
-  payload_available: "online"
-  payload_not_available: "offline"
-  qos: 0
-  device_class: presence
+## Quick start (Docker)
+
+```bash
+# Edit config.yaml first, then:
+docker compose up -d
 ```
 
-### Handle local options (3 types)
-Example unipi_mqtt_config.json with "handle local" function to handle a local "critical" function within the script so it works without HA or other MQTT connections. This also sends MQTT messages to inform HA about the state change.
+To run on a central NUC / Kubernetes cluster, point `unipi.ws_url` and `unipi.api_url` in `config.yaml` at the UniPi's IP address and mount `config.yaml` as a volume or ConfigMap.
 
-#### 1 - Handle Local Bel (on AND off switch of relay in 1 action)
-This example rings a bel 3 time (or switches a realy 3 x on and off, so 6 total actions). The bel I use is a Friendland bel on 12 or 24 volt. It rings once on power on and power off (power on pulls the ring stick, power off launches it to ring quite loud). 
+## Configuration
 
-```json
-   {
-      "circuit":"2_05",
-      "description":"Voordeur Beldrukker",
-      "dev":"input",
-      "handle_local":
-            {
-	            "type": "bel",
-				"trigger":"on",
-				"rings": 3,
-				"output_dev": "output",
-				"output_circuit": "2_01"
-			},
-      "device_delay":1,
-      "device_normal":"no",
-      "unipi_value":0,
-      "unipi_prev_value":0,
-      "unipi_prev_value_timstamp":0,
-      "state_topic": "unipi/bgg/voordeur/beldrukker"
-   }
+All configuration lives in `config.yaml`. See the inline comments there for the full reference.
+
+### `mqtt` section
+
+```yaml
+mqtt:
+  host: "192.168.1.10"
+  port: 1883
+  username: "myuser"
+  password: "mypass"
+  client_id: "unipi-mqtt"
+  discovery_prefix: "homeassistant"
 ```
 
-I trigger this in HA from a automation where the action part is;
-```
-  action:
-    - service: mqtt.publish
-      data:
-        topic: 'homeassistant/bgg/hal/bel/set'
-        payload: '{"circuit": "2_01", "dev": "relay", "repeat": "1", "state": "pulse"}'
-```
+### `unipi` section
 
-#### 2 - Handle Local Light Dimmer (Analog output 0-10 volt).
-Example unipi_mqtt_config.json of a handle local switch with dimmer (analog output 0-10 volt is used to dimm led source). I user 0-10 volt (not 1-10!) led dimmers. Works flawlessly. Note that the Level in unipi = 0-10 and in HA 0-255 for 0-100%. Not that handle local sets a value, but it's static. Things like holding the sensor to dimm are not implemented.
-
-unipi_mqtt_config.json:
-
-```{
-      "circuit":"3_02",
-      "description":"Schakelaar Bijkeuken Licht",
-      "dev":"input",
-      "handle_local":
-            {
-	            "type": "dimmer",
-	            "output_dev": "analogoutput",
-		    "output_circuit": "2_03",
-		    "level": 10
-	    },
-      "device_normal":"no",
-      "state_topic": "homeassistant/bgg/bijkeuken/licht"
-   }
+```yaml
+unipi:
+  ws_url: "ws://192.168.1.100/ws"
+  api_url: "http://192.168.1.100:8080/rest"
 ```
 
-The HA part can look like:
+### Outputs
 
-```
-- platform: mqtt
-  schema: template
-  name: "Woonkamer Nis light"
-  unique_id: "woonkamer_nis_licht"
-  state_topic: "homeassistant/bgg/woonkamer/nis/licht"
-  command_topic: "homeassistant/bgg/woonkamer/nis/licht/set"
-  availability_topic: "homeassistant/bgg/woonkamer/nis/licht/available"
-  payload_available: "online"
-  payload_not_available: "offline"
-  command_on_template: >
-    {"state": "on"
-    , "circuit": "2_04"
-    , "dev": "analogoutput"
-    {%- if brightness is defined -%}
-    , "brightness": {{ brightness }}
-    {%- elif brightness is undefined -%}
-    , "brightness": 100
-    {%- endif -%}
-    {%- if transition is defined -%}
-    , "transition": {{ transition }}
-    {%- endif -%}
-    }
-  command_off_template: '{"state": "off", "circuit": "2_04", "dev": "analogoutput"}'
-  state_template: '{{ value_json.state }}'
-  brightness_template: '{{ value_json.brightness }}'
-  qos: 0
+Each output maps a UniPi relay/digital output to an HA entity.
+
+```yaml
+outputs:
+  - id: "relay_2_02" # unique id used in input links
+    circuit: "2_02" # UniPi circuit identifier
+    dev: "relay" # UniPi device type: relay or output
+    name: "Badkamer Meubel"
+    ha_component: "light" # HA entity type: light or switch
 ```
 
-#### 3 - Handle Local Switch (output or relayoutput toggle)
-Example unipi_mqtt_config.json of handle local switch (on / off only, relay or digital output used to switch a device or powersource to a device).
-It will poll the unipi box and toggle the output to the other state. So on becomes off and visa versa. A MQTT message reflecting this is send. HA need to have the some topic and payload to recognise a change in the HA GUI.
+### Inputs
 
-```{
-      "circuit":"UART_4_4_04",
-      "description":"TEST IN FUTURE Schakelaar Woonkamer Eker Licht",
-      "dev":"input",
-      "handle_local":
-        {
-	        "type": "switch",
-	        "output_dev": "output",
-		"output_circuit": "2_02"
-	},
-      "device_normal":"no",
-      "state_topic": "homeassistant/bgg/meterkast/testrelay"
-   }
+Each input maps a UniPi digital input to an HA binary sensor and optionally links it to one or more outputs.
+
+| Field                    | Description                                                             |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `circuit`                | UniPi circuit identifier                                                |
+| `name`                   | Human-readable name, used in HA entity names and unique IDs             |
+| `type`                   | `pushbutton`, `switch`, `contact`, or `motion`                          |
+| `normal`                 | `no` (normally-open) or `nc` (normally-closed)                          |
+| `delay_s`                | Auto-off delay in seconds (motion sensors only)                         |
+| `ha_publish`             | `true` (default) to expose as a binary sensor in HA                     |
+| `short_press_max_ms`     | Max duration for a short press — default `1000` ms                      |
+| `long_press_max_ms`      | Max duration for a long press — default `4000` ms                       |
+| `double_press_window_ms` | Max gap between two short presses to count as double — default `400` ms |
+
+### Links (input → output)
+
+Each input can have multiple `links`. A link fires only when its `trigger` matches the event on the input.
+
+| Trigger        | Input type       | Description                                    |
+| -------------- | ---------------- | ---------------------------------------------- |
+| `short_press`  | pushbutton       | Quick tap (< `short_press_max_ms`)             |
+| `long_press`   | pushbutton       | Held press (≥ `short_press_max_ms`)            |
+| `double_press` | pushbutton       | Two quick taps within `double_press_window_ms` |
+| `change`       | switch / contact | Any state change                               |
+| `on`           | motion           | Motion detected                                |
+
+Link fields:
+
+| Field        | Description                                                       |
+| ------------ | ----------------------------------------------------------------- |
+| `output`     | `id` of the output to control                                     |
+| `action`     | `toggle` (default), `on`, or `off`                                |
+| `trigger`    | See table above                                                   |
+| `auto_off_s` | Seconds after which the output turns off automatically (optional) |
+
+### Example — three press types on one button
+
+```yaml
+inputs:
+  - circuit: "2_09"
+    name: "Drukknop Eetkamer A"
+    type: "pushbutton"
+    links:
+      # Short press: toggle the light
+      - output: "relay_2_05"
+        action: "toggle"
+        trigger: "short_press"
+      # Long press: turn off unconditionally
+      - output: "relay_2_05"
+        action: "off"
+        trigger: "long_press"
+      # Double press: turn on with a 30-minute auto-off
+      - output: "relay_2_05"
+        action: "on"
+        trigger: "double_press"
+        auto_off_s: 1800
 ```
 
-The HA part of this switch looks like (for me under lights in YAML):
-```
-- platform: mqtt
-  schema: template
-  name: "Test Relay 2_02"
-  unique_id: "test_relay_2_02"
-  state_topic: "homeassistant/bgg/meterkast/testrelay"
-  command_topic: "homeassistant/bgg/meterkast/testrelay/set"
-  availability_topic: "homeassistant/bgg/meterkast/testrelay/available"
-  payload_available: "online"
-  payload_not_available: "offline"
-  command_on_template: '{"state": "on", "circuit": "2_02", "dev": "output"}'
-  command_off_template: '{"state": "off", "circuit": "2_02", "dev": "output"}'
-  state_template: '{{ value_json.state }}'
-  qos: 0
-```
+### Example — motion sensor with auto-off
 
-### 1-Wire sensors
-You can connect 1-wire sensors to the Unipi (16 cascaded sensors to 1 1-wire port). The sensors allow you to measure things like temperature and humidity. The implementation currently support sensors with model `DS2438` and `DS18B20`. Other might work, but I just don't have them and the script hard-checks for those models. So let me know if you need a change / add here. This info can be found in the UniPi API (exmp. http://192.168.1.125:8080/rest/sensor/28D1EFB708025352 ) The value for "circuit" can be found in the web GUI of the UNiPi.
-
-Config in unipi_mqtt the config file
-```
-"circuit":"28D1EFB708025352",
-"description":"Temperatuur Sensor buiten",
-"dev":"temp",
-"interval":19,
-"state_topic":"unipi/buiten/voordeur/temperatuur"
+```yaml
+inputs:
+  - circuit: "1_01"
+    name: "Badkamer Bewegingsmelder"
+    type: "motion"
+    normal: "no"
+    delay_s: 120
+    ha_publish: true
+    links:
+      - output: "relay_2_02"
+        action: "on"
+        trigger: "on"
 ```
 
-"dev" value options are `"temp"`, `"humidity"` or `"light"`.
+### Example — wall switch controlling a light
 
-Config in HA sensors part:
-```
-- platform: mqtt
-  name: "Buiten Temperatuur"
-  unique_id: "buiten_temperatuur"
-  state_topic: "unipi/buiten/voordeur/temperatuur"
-  unit_of_measurement: "°C"
-  value_template: "{{value_json.temperature}}"
-  force_update: true
-```
-
-NOTE: the `force_update: true` is used to always update the sensor. Home Assistant by default does NOT updates sensor values if they, compared to the latest value, are unchanged. This is optional. Since I run a script to monitor my unipi device based on a regular update (if > 10 min no update = alart) of this value I want it to always update.
-
-## Description of the fields:
- - dev: The input device type on the UniPi
- - circuit: The input circuit on the UniPi
- - description: Description of what you do with this input
- - device_delay: delay to turn device off automatically (used for PIR sensors that work pulse based)
- - device_normal: is device normal open or normal closed
- - unipi_value: what is the current value, used as a "global var"
- - unipi_prev_value: what is the previous value, used as a "global var" to calculate average of multiple values ver time
- - unipi_prev_value_timstamp: when was the last status change. Used for delay based off messages, for exmpl. for PIR pulse
- - state_topic: MQTT state topic to send message on
- - handle_local: Use to switch outputs based on a input directly. So no dependency on MQTT broker or HASSIO. Use this for bel and light switches. Does send a MQTT update message to status can change in Home Assistant.
- - interval: value for 1-wire sensors and analog inputs to create an avarage based on this number of readings and send this avg out.
- 
-
-## MQTT messages to change UniPi Outputs
-You can send MQTT message to the Unipi box over MQTT to switch outputs. This does not require a config entry on the unipi since we're sending the device and circuit information in the MQTT message that is handled by the script.
-
-Example for dimmable light (publish from HASS to UniPi to turn on an output)
-```
-- platform: mqtt
-  schema: template
-  name: "Voordeur light"
-  state_topic: "homeassistant/buiten/voordeur/licht"
-  command_topic: "homeassistant/buiten/voordeur/licht/set"
-  availability_topic: "homeassistant/buiten/voordeur/licht/available"
-  payload_available: "online"
-  payload_not_available: "offline"
-  command_on_template: >
-    {"state": "on"
-    , "circuit": "2_02"
-    , "dev": "analogoutput"
-    {%- if brightness is defined -%}
-    , "brightness": {{ brightness }}
-    {%- elif brightness is undefined -%}
-    , "brightness": 100
-    {%- endif -%}
-    {%- if effect is defined -%}
-    , "effect": "{{ effect }}"
-    {%- endif -%}
-    {%- if transition is defined -%}
-    , "transition": {{ transition }}
-    {%- endif -%}
-    }
-  command_off_template: '{"state": "off", "circuit": "2_02", "dev": "analogoutput"}'
-  state_template: '{{ value_json.state }}'
-  brightness_template: '{{ value_json.brightness }}'
-  qos: 0
+```yaml
+inputs:
+  - circuit: "2_01"
+    name: "Schakelaar Gang"
+    type: "switch"
+    normal: "no"
+    ha_publish: true
+    links:
+      - output: "relay_2_04"
+        action: "toggle"
+        trigger: "change"
 ```
 
-Switch a relay:
+## Running as a systemd service (on the UniPi)
+
+```ini
+# /etc/systemd/system/unipi-mqtt.service
+[Unit]
+Description=UniPi MQTT bridge
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/unipi-mqtt/unipi_mqtt.py
+WorkingDirectory=/opt/unipi-mqtt
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
 ```
-- platform: mqtt
-  schema: template
-  name: "Test Relay 2_02"
-  unique_id: "test_relay_2_02"
-  state_topic: "unipi1/bgg/meterkast/testrelay"
-  command_topic: "unipi1/bgg/meterkast/testrelay/set"
-  payload_available: "online"
-  payload_not_available: "offline"
-  command_on_template: '{"state": "on", "circuit": "2_02", "dev": "output"}'
-  command_off_template: '{"state": "off", "circuit": "2_02", "dev": "output"}'
-  state_template: "{{ value_json.state }}"
-  qos: 0
+
+```bash
+sudo systemctl enable --now unipi-mqtt
 ```
 
-I the device remains offline you need to take out the availability topic line to let HA not check that. 
+## Home Assistant integration
 
+No manual HA configuration is needed. Once the bridge is running, all configured outputs and inputs appear automatically under **Settings → Devices & Services → MQTT**.
 
-# Change log
+- Outputs are registered as `light` or `switch` entities
+- Inputs are registered as `binary_sensor` entities with the appropriate `device_class`
+- All entities include an availability topic so HA shows them as unavailable if the bridge stops
 
-### version 02.2021.1 ("the average" release)
-Changes:
- - the 1-wire implementation did not use the average setting. Rewrote the 1-wire part for temp and humidity sensors. You can now add a "interval" variable that counts creates an average. "interval" is the number or readings. Note that 1-wire readings are approx. once every 3 seconds and 0 is the first value so a seeeting of 19 = 20 values. This allows you to greatly reduce the number of updates HA has to handle when the sensors count builds. :-)
- - The same average sytems is used for LUX value based on an anolog input (I know, rather specific). 
+## Architecture
 
-### version 11.2020 (the "Stijn" release)
-Changes:
- - New version numbering since that's really cool
- - Made WebSockets listener re-connect on disconnect (like a service interruption of evok) every 5 seconds
- - implemented authentication for MQTT since that is a requirement for HA now
- - adjusted some timeouts to make a external realy work via the bel function
- - Changed the unipi_mqtt.service file to restart a service if the script fails for enhanced resillience
+```
+UniPi Evok WebSocket  ──►  unipi_mqtt.py  ──►  MQTT broker  ──►  Home Assistant
+Home Assistant MQTT command  ──►  unipi_mqtt.py  ──►  Evok REST API
+```
 
-### Version 0.4
-Changes:
- - Added authentication for MQTT with username and password variable since the standard MQTT broker in HA requires this from now on.
- - Added a counter function to count pulses coming in on a digital input. Counter totals and counter delta for X time can be send via MQTT. Personally use this for a water flow meter that procuces pulse for every X ML.
- - Changed the time based interval to a clock instead of imconning messages to be a bit more precise. 
- - Changes handle local for swithes. Was sending back a wrong MQTT topic for my HA config to work (MIGHT BE BREAKING CHANGE). 
- - Changed a bug in unipython.py where switch status for on / off was the wrong way around.
- - 0.41 has a small fix to honor the "level" information in unipi_mqtt_config for handle local dimmmers.
+The bridge runs a single async event loop with two concurrent tasks:
 
-### Version 0.3
-Changes:
- - Changed the thread part so threading and especially the stop thread part now works correctly
- - Changed the MQTT send part to make sure that on a handle local action only 1 message is send (was 4). Now works nicely
- - Revamped the threaded function like duration and transition to be interuptable
- - Changed code for the 1 wire devices. Upgrade of Evok changed the naming convention for those devices from "temp" to "1wire". Now handled again.
+1. **Evok WS listener** — receives real-time input/output state changes from Evok
+2. **MQTT command listener** — receives `ON`/`OFF` commands from Home Assistant
 
-### Version 0.2
-Changes:
- - Changed handling if DI devices with delay to no longer use previous state for rest of devices, cleaned up json config file. Should fix a bug that crashed the script on certain ON / OFF actions.
- - Implemented a "frist run" part to set MQTT messages at script start to reflect actual status of inputs, not last known status maintained in MQTT broker or no status at al. 
- - tested UART (extension module) and that works. Changed config file with example
-
-### Version 0.1
-Initial release and documentation in this readme file
-
-## ToDo
-  - Something with certificates
-  - Use config file for client part too?
-  - clean up code more
-  - many other yet to discover things.
-
-# Test info
-
-Tested on a UniPi 513 with Extensio xS30 running Evok 2.x and Home Assistant 0.102
-Used:
- - 0-10v inputs and outputs
- - relay outputs
- - Digital inputs and outputs
- - 1 wire for temp, humidity and light
- - UART Extention module 30
-
+Local links (e.g. a pushbutton directly toggling a relay) are executed within the same event loop and work without MQTT or Home Assistant.

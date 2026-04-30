@@ -1,0 +1,223 @@
+mqtt:
+  host: "192.168.1.x"
+  port: 1883
+  username: "unipi02"
+  password: "abc123ABC!@#"
+  client_id: "unipi-mqtt"
+  # Discovery prefix for Home Assistant MQTT auto-discovery
+  discovery_prefix: "homeassistant"
+
+unipi:
+  # Evok WebSocket endpoint
+  ws_url: "ws://192.168.1.x/ws"
+  # Evok REST API base URL (used to set output states)
+  api_url: "http://192.168.1.x:8080/rest"
+
+logging:
+  level: "INFO" # DEBUG, INFO, WARNING, ERROR
+
+# ──────────────────────────────────────────────────────────────────────────────
+# inputs: Digital inputs (switches, pushbuttons, door contacts, PIR, …)
+#
+# Fields:
+#   circuit      - UniPi circuit id, e.g. "1_01"
+#   name         - Human-readable name; used in HA entity names / unique ids
+#   normal       - "no" (normally-open) or "nc" (normally-closed)
+#   type         - "switch"     → toggles on every state change
+#                  "pushbutton" → detects short / long / double press
+#                  "contact"    → door/window sensor, reports open/closed
+#                  "motion"     → PIR; auto-publishes OFF after delay_s seconds
+#   delay_s      - Seconds before auto-off (motion sensors only)
+#   ha_publish   - true (default) to expose as binary_sensor in HA
+#
+# Pushbutton timing (all optional – defaults shown):
+#   short_press_max_ms    - Max ms for a short press           (default: 1000)
+#   long_press_max_ms     - Max ms for a long press (≥ short)  (default: 4000)
+#   double_press_window_ms- Max ms between two presses to count as double
+#                                                              (default: 400)
+#
+# links: List of outputs this input directly controls.
+#   output     - id of the output (from the outputs section)
+#   action     - "toggle" (default), "on", or "off"
+#   trigger    - When to fire this link:
+#                  Pushbutton: "short_press" (default), "long_press",
+#                              "double_press"
+#                  Switch / contact / motion: leave empty – all links fire
+#   auto_off_s - Seconds after which the output is automatically turned off.
+#                Only has effect if the output ends up ON after the action.
+# ──────────────────────────────────────────────────────────────────────────────
+inputs:
+  - circuit: "1_01"
+    name: "Badkamer Bewegingsmelder"
+    normal: "no"
+    type: "motion"
+    delay_s: 30
+    ha_publish: true
+
+  - circuit: "1_02"
+    name: "Drukknop Badkamer A"
+    normal: "no"
+    type: "pushbutton"
+    ha_publish: true
+    # Short press toggles both lights; long press turns them all off;
+    # double press turns them on with a 30-minute auto-off.
+    links:
+      - output: "relay_2_02"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_03"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_02"
+        action: "off"
+        trigger: "long_press"
+      - output: "relay_2_03"
+        action: "off"
+        trigger: "long_press"
+      - output: "relay_2_02"
+        action: "on"
+        trigger: "double_press"
+        auto_off_s: 1800
+      - output: "relay_2_03"
+        action: "on"
+        trigger: "double_press"
+        auto_off_s: 1800
+
+  - circuit: "1_03"
+    name: "Drukknop Badkamer B"
+    normal: "no"
+    type: "pushbutton"
+    ha_publish: true
+    links:
+      - output: "relay_2_02"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_03"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_02"
+        action: "off"
+        trigger: "long_press"
+      - output: "relay_2_03"
+        action: "off"
+        trigger: "long_press"
+
+  - circuit: "2_02"
+    name: "Drukknop Badkamer C"
+    normal: "no"
+    type: "pushbutton"
+    ha_publish: true
+    links:
+      - output: "relay_2_02"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_03"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_02"
+        action: "off"
+        trigger: "long_press"
+      - output: "relay_2_03"
+        action: "off"
+        trigger: "long_press"
+
+  - circuit: "2_03"
+    name: "Drukknop Badkamer D"
+    normal: "no"
+    type: "pushbutton"
+    ha_publish: true
+    links:
+      - output: "relay_2_02"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_03"
+        action: "toggle"
+        trigger: "short_press"
+      - output: "relay_2_02"
+        action: "off"
+        trigger: "long_press"
+      - output: "relay_2_03"
+        action: "off"
+        trigger: "long_press"
+
+  - circuit: "2_01"
+    name: "Schakelaar Gang BG"
+    normal: "no"
+    type: "switch"
+    ha_publish: true
+    links:
+      - output: "relay_2_04"
+        action: "toggle"
+        trigger: "change"
+
+  - circuit: "2_04"
+    name: "Schakelaar Gang +1"
+    normal: "no"
+    type: "switch"
+    ha_publish: true
+    links:
+      - output: "relay_2_04"
+        action: "toggle"
+        trigger: "change"
+
+  - circuit: "2_06"
+    name: "Schakelaar Henri"
+    normal: "no"
+    type: "switch"
+    ha_publish: true
+    links:
+      - output: "relay_2_09"
+        action: "toggle"
+        trigger: "change"
+
+  - circuit: "2_07"
+    name: "Schakelaar Renée"
+    normal: "no"
+    type: "switch"
+    ha_publish: true
+    links:
+      - output: "relay_2_10"
+        action: "toggle"
+        trigger: "change"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# outputs: Relays and digital outputs
+#
+# Fields:
+#   id           - Internal id used in input links
+#   circuit      - UniPi circuit id
+#   dev          - "relay" or "output"
+#   name         - Human-readable name; used in HA entity names
+#   ha_publish   - true (default) to expose as switch/light in HA
+#   ha_component - "switch" (default) or "light"
+# ──────────────────────────────────────────────────────────────────────────────
+outputs:
+  - id: "relay_2_02"
+    circuit: "2_02"
+    dev: "relay"
+    name: "Badkamer Meubel"
+    ha_component: "light"
+
+  - id: "relay_2_03"
+    circuit: "2_03"
+    dev: "relay"
+    name: "Badkamer Verlichting"
+    ha_component: "light"
+
+  - id: "relay_2_04"
+    circuit: "2_04"
+    dev: "relay"
+    name: "Gang +1 Verlichting"
+    ha_component: "light"
+
+  - id: "relay_2_09"
+    circuit: "2_09"
+    dev: "relay"
+    name: "Kamer Henri Verlichting"
+    ha_component: "light"
+
+  - id: "relay_2_10"
+    circuit: "2_10"
+    dev: "relay"
+    name: "Kamer Renée Verlichting"
+    ha_component: "light"

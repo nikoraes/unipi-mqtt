@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  unipi-mqtt:
+    build: .
+    image: unipi-mqtt:latest
+    container_name: unipi-mqtt
+    restart: unless-stopped
+    # Mount your site-specific config without rebuilding the image
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    # The container only needs network access to the MQTT broker and the UniPi
+    # device. If both run on the same host network use `network_mode: host`.
+    # Otherwise configure the correct hostnames/IPs in config.yaml and leave
+    # the default bridge network.
+    # network_mode: host
+    environment:
+      # Override log level at runtime without touching config.yaml
+      - LOG_LEVEL=INFO
